@@ -1,0 +1,293 @@
+<!doctype html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="utf-8" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<title>Match-3 Solver Companion</title>
+
+
+
+</head>
+
+
+
+<body>
+
+<h1>Match-3 Solver Companion</h1>
+
+
+
+<!-- Banner for guaranteed moves -->
+
+<div id="banner" class="banner" style="display:none;"></div>
+
+
+
+<!-- Controls -->
+
+<div class="controls">
+
+  <div>
+
+    <label>Target color</label>
+
+    <select id="targetColor"></select>
+
+  </div>
+
+  <div>
+
+    <label>Sample size</label>
+
+    <input id="sampleCount" type="range" min="200" max="5000" value="1200" step="200" />
+
+    <div><small><span id="sampleVal">1200</span> boards</small></div>
+
+  </div>
+
+  <div><button id="regen" class="ghost">Regenerate Boards</button></div>
+
+  <div><button id="reset" class="ghost">Reset Reveals</button></div>
+
+</div>
+
+
+
+<!-- Color Legend -->
+
+<div id="legend" class="legend"></div>
+
+
+
+<!-- Board Grid -->
+
+<div id="grid" class="grid"></div>
+
+
+
+/* --- State --- */
+
+let sampleCount=1200, possibleBoards=[], revealed=new Map();
+
+
+
+/* --- DOM refs --- */
+
+const grid=document.getElementById("grid"),
+
+      targetEl=document.getElementById("targetColor"),
+
+      sample=document.getElementById("sampleCount"),
+
+      sampleVal=document.getElementById("sampleVal"),
+
+      banner=document.getElementById("banner"),
+
+      legend=document.getElementById("legend");
+
+
+
+/* --- Helpers --- */
+
+function shuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+function genBoard(){const pool=[];for(const c of COLORS)for(let i=0;i<COPIES;i++)pool.push(c);return shuffle(pool);}
+
+function genBoards(n){return Array.from({length:n},genBoard);}
+
+function filterBoards(){possibleBoards=possibleBoards.filter(b=>[...revealed].every(([p,c])=>b[p]===c));}
+
+function probsFor(color){
+
+  const res=Array(TILES).fill(0),total=possibleBoards.length||1;
+
+  for(let pos=0;pos<TILES;pos++){
+
+    if(revealed.has(pos)){res[pos]=null;continue;}
+
+    let count=0;for(const b of possibleBoards)if(b[pos]===color)count++;
+
+    res[pos]=count/total;
+
+  }return res;
+
+}
+
+function findBest(probs){let best=null,p=-1;for(let i=0;i<TILES;i++){if(probs[i]>p){p=probs[i];best=i;}}return{pos:best,prob:p};}
+
+function guaranteedTiles(){
+
+  const total=possibleBoards.length,results=[];
+
+  if(total===0)return results;
+
+  for(let pos=0;pos<TILES;pos++){
+
+    if(revealed.has(pos))continue;
+
+    const color=possibleBoards[0][pos];
+
+    if(possibleBoards.every(b=>b[pos]===color))results.push({pos,color});
+
+  }return results;
+
+}
+
+
+
+/* --- Rendering --- */
+
+function buildLegend(){
+
+  legend.innerHTML="";COLORS.forEach(c=>{
+
+    const chip=document.createElement("div");chip.className="chip";
+
+    const sw=document.createElement("span");sw.className="swatch";sw.style.background=COLOR_HEX[c];
+
+    chip.appendChild(sw);chip.appendChild(document.createTextNode(c));legend.appendChild(chip);
+
+  });
+
+}
+
+function buildTargetSelect(){
+
+  targetEl.innerHTML="";COLORS.forEach(c=>{
+
+    const o=document.createElement("option");o.value=c;o.textContent=c;if(c==="red")o.selected=true;targetEl.appendChild(o);
+
+  });
+
+}
+
+function render(){
+
+  const target=targetEl.value;
+
+  const probs=probsFor(target);
+
+  const {pos:best}=findBest(probs);
+
+  const guarantees=guaranteedTiles();
+
+
+
+  // Banner
+
+  if(guarantees.length>0){
+
+    banner.style.display="block";
+
+    banner.textContent="🎯 Guaranteed: " + guarantees.map(g=>`Tile ${g.pos} is ${g.color}`).join(", ");
+
+  } else banner.style.display="none";
+
+
+
+  // Grid
+
+  grid.innerHTML="";
+
+  for(let i=0;i<TILES;i++){
+
+    const tile=document.createElement("div");tile.className="tile";tile.dataset.pos=i;
+
+    if(revealed.has(i)){
+
+      const color=revealed.get(i);tile.classList.add("revealed");
+
+      tile.style.background=COLOR_HEX[color];tile.textContent=color[0].toUpperCase();
+
+    } else {
+
+      const p=probs[i];const badge=document.createElement("div");badge.className="prob";badge.textContent=`${Math.round((p||0)*100)}%`;tile.appendChild(badge);
+
+    }
+
+    if(best===i && !revealed.has(i))tile.classList.add("best");
+
+    if(guarantees.some(g=>g.pos===i))tile.classList.add("best");
+
+    tile.onclick=()=>openPopover(tile,i);
+
+    grid.appendChild(tile);
+
+  }
+
+  document.title=`Solver • ${possibleBoards.length} boards remain`;
+
+}
+
+
+
+/* --- Popover --- */
+
+let popover=null;
+
+function openPopover(tile,pos){
+
+  closePopover();
+
+  popover=document.createElement("div");popover.className="popover";
+
+  // Clear button
+
+  const clear=document.createElement("button");clear.className="clear";clear.textContent="X";clear.onclick=()=>{revealed.delete(pos);filterBoards();closePopover();render();};
+
+  popover.appendChild(clear);
+
+  // Color buttons
+
+  COLORS.forEach(c=>{
+
+    const b=document.createElement("button");b.style.background=COLOR_HEX[c];b.title=c;
+
+    b.onclick=()=>{revealed.set(pos,c);filterBoards();closePopover();render();};
+
+    popover.appendChild(b);
+
+  });
+
+  document.body.appendChild(popover);
+
+  const rect=tile.getBoundingClientRect();
+
+  popover.style.top=(rect.top+window.scrollY-80)+"px";
+
+  popover.style.left=(rect.left+window.scrollX)+"px";
+
+}
+
+function closePopover(){if(popover){popover.remove();popover=null;}}
+
+document.addEventListener("click",e=>{if(popover && !popover.contains(e.target) && !e.target.classList.contains("tile"))closePopover();});
+
+
+
+/* --- Setup --- */
+
+sample.oninput=e=>{sampleCount=+e.target.value;sampleVal.textContent=sampleCount;};
+
+document.getElementById("regen").onclick=()=>{possibleBoards=genBoards(sampleCount);filterBoards();render();};
+
+document.getElementById("reset").onclick=()=>{revealed.clear();possibleBoards=genBoards(sampleCount);render();};
+
+targetEl.onchange=render;
+
+
+
+buildLegend();buildTargetSelect();
+
+possibleBoards=genBoards(sampleCount);render();
+
+</script>
+
+</body>
+
+</html>
